@@ -1,8 +1,10 @@
 import { action, computed, observable } from "mobx";
 import { createContext, useContext, useMemo, PropsWithChildren } from "react";
 import { Heading } from "@shared/utils/ProsemirrorHelper";
+import { ChunkManager } from "@shared/editor/lib/ChunkManager";
 import Document from "~/models/Document";
 import { Editor } from "~/editor";
+import { TOCManager } from "~/components/DocumentTOC";
 
 class DocumentContext {
   /** The current document */
@@ -10,6 +12,12 @@ class DocumentContext {
 
   /** The editor instance for this document */
   editor?: Editor;
+
+  /** The chunk manager for large documents */
+  chunkManager?: ChunkManager;
+
+  /** The TOC manager for cross-chunk navigation */
+  tocManager?: TOCManager;
 
   /** The ID of the currently focused comment, or null if no comment is focused */
   @observable
@@ -22,6 +30,10 @@ class DocumentContext {
   /** The headings in the document */
   @observable
   headings: Heading[] = [];
+
+  /** Whether chunking is enabled for this document */
+  @observable
+  isChunkingEnabled: boolean = false;
 
   @computed
   get hasHeadings() {
@@ -41,6 +53,21 @@ class DocumentContext {
   };
 
   @action
+  setChunkManager = (chunkManager: ChunkManager | undefined) => {
+    this.chunkManager = chunkManager;
+
+    // 创建或销毁 TOCManager
+    if (chunkManager) {
+      this.tocManager = new TOCManager(chunkManager);
+      this.isChunkingEnabled = true;
+    } else {
+      this.tocManager?.destroy();
+      this.tocManager = undefined;
+      this.isChunkingEnabled = false;
+    }
+  };
+
+  @action
   setEditorInitialized = (initialized: boolean) => {
     this.isEditorInitialized = initialized;
   };
@@ -57,13 +84,32 @@ class DocumentContext {
   };
 
   private updateHeadings() {
-    const currHeadings = this.editor?.getHeadings() ?? [];
-    const hasChanged =
-      currHeadings.map((h) => h.level + h.title).join("") !==
-      this.headings.map((h) => h.level + h.title).join("");
+    // 如果启用了分块，从 TOCManager 获取 headings
+    if (this.isChunkingEnabled && this.tocManager) {
+      const tocHeadings = this.tocManager.getAllHeadings();
+      const currHeadings = tocHeadings.map((h) => ({
+        id: h.id,
+        title: h.title,
+        level: h.level,
+      }));
 
-    if (hasChanged) {
-      this.headings = currHeadings;
+      const hasChanged =
+        currHeadings.map((h) => h.level + h.title).join("") !==
+        this.headings.map((h) => h.level + h.title).join("");
+
+      if (hasChanged) {
+        this.headings = currHeadings;
+      }
+    } else {
+      // 传统模式：从 editor 获取 headings
+      const currHeadings = this.editor?.getHeadings() ?? [];
+      const hasChanged =
+        currHeadings.map((h) => h.level + h.title).join("") !==
+        this.headings.map((h) => h.level + h.title).join("");
+
+      if (hasChanged) {
+        this.headings = currHeadings;
+      }
     }
   }
 

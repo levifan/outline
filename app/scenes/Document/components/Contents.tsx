@@ -17,7 +17,7 @@ function Contents() {
   const scrollPosition = useWindowScrollPosition({
     throttle: 100,
   });
-  const { headings } = useDocumentContext();
+  const { headings, tocManager, isChunkingEnabled } = useDocumentContext();
 
   useEffect(() => {
     let activeId = headings.length > 0 ? headings[0].id : undefined;
@@ -41,6 +41,26 @@ function Contents() {
       setActiveSlug(activeId);
     }
   }, [scrollPosition, headings]);
+
+  // 处理 heading 点击（支持跨页导航）
+  const handleHeadingClick = async (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    headingId: string
+  ) => {
+    event.preventDefault();
+
+    if (isChunkingEnabled && tocManager) {
+      // 分块模式：使用 TOCManager 的跨页导航
+      try {
+        await tocManager.scrollToHeading(headingId);
+      } catch (error) {
+        console.error("Failed to navigate to heading:", error);
+      }
+    } else {
+      // 传统模式：使用标准的锚点导航
+      window.location.hash = headingId;
+    }
+  };
 
   // calculate the minimum heading level and adjust all the headings to make
   // that the top-most. This prevents the contents from being weirdly indented
@@ -68,7 +88,12 @@ function Contents() {
               level={heading.level - headingAdjustment}
               active={activeSlug === heading.id}
             >
-              <Link href={`#${heading.id}`}>{heading.title}</Link>
+              <Link
+                href={`#${heading.id}`}
+                onClick={(e) => handleHeadingClick(e, heading.id)}
+              >
+                {heading.title}
+              </Link>
             </ListItem>
           ))}
       </List>
