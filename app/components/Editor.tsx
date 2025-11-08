@@ -14,6 +14,7 @@ import { AttachmentValidation } from "@shared/validations";
 import ClickablePadding from "~/components/ClickablePadding";
 import ErrorBoundary from "~/components/ErrorBoundary";
 import type { Props as EditorProps, Editor as SharedEditor } from "~/editor";
+import { useDocumentContext } from "~/components/DocumentContext";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useDictionary from "~/hooks/useDictionary";
 import useEditorClickHandlers from "~/hooks/useEditorClickHandlers";
@@ -21,6 +22,7 @@ import useEmbeds from "~/hooks/useEmbeds";
 import useStores from "~/hooks/useStores";
 import { uploadFile, uploadFileFromUrl } from "~/utils/files";
 import lazyWithRetry from "~/utils/lazyWithRetry";
+import { ChunkedEditorWrapper } from "~/editor/components/ChunkedEditorWrapper";
 
 const LazyLoadedEditor = lazyWithRetry(() => import("~/editor"));
 
@@ -44,6 +46,16 @@ function Editor(props: Props, ref: React.RefObject<SharedEditor> | null) {
   const { id, shareId, onChange, onCreateCommentMark, onDeleteCommentMark } =
     props;
   const { comments } = useStores();
+
+  // Safely get document context (might not be available in all usages)
+  let documentContext;
+  try {
+    documentContext = useDocumentContext();
+  } catch {
+    // Context not available - chunking will be disabled
+    documentContext = null;
+  }
+
   const dictionary = useDictionary();
   const embeds = useEmbeds(!shareId);
   const localRef = React.useRef<SharedEditor>();
@@ -192,47 +204,73 @@ function Editor(props: Props, ref: React.RefObject<SharedEditor> | null) {
     return undefined;
   }, [props.readOnly, props.value]);
 
+  // Check if we should try chunked rendering
+  const shouldTryChunking = props.readOnly && typeof props.value === "object";
+
+  // Check if chunking is currently active
+  const isChunkingActive = documentContext?.isChunkingEnabled ?? false;
+
   return (
     <ErrorBoundary component="div" reloadOnChunkMissing>
       <>
-        {paragraphs ? (
-          <EditorContainer
-            rtl={props.dir === "rtl"}
-            grow={props.grow}
-            style={props.style}
-            editorStyle={props.editorStyle}
-            commenting={!!props.onClickCommentMark}
+        {shouldTryChunking && (
+          <ChunkedEditorWrapper
+            value={props.value}
+            readOnly={props.readOnly}
+            documentId={id}
           >
-            <div className="ProseMirror">
-              {paragraphs.map((paragraph, index) => (
-                <p key={index} dir="auto">
-                  {paragraph.content?.map((content) => content.text)}
-                </p>
-              ))}
-            </div>
-          </EditorContainer>
-        ) : (
-          <LazyLoadedEditor
-            key={props.extensions?.length || 0}
-            ref={mergeRefs([ref, localRef, handleRefChanged])}
-            uploadFile={handleUploadFile}
-            embeds={embeds}
-            userPreferences={preferences}
-            dictionary={dictionary}
-            {...props}
-            onClickLink={handleClickLink}
-            onChange={handleChange}
-            placeholder={props.placeholder || ""}
-            defaultValue={props.defaultValue || ""}
-          />
+            {props.editorStyle?.paddingBottom && !props.readOnly && (
+              <ClickablePadding
+                onClick={props.readOnly ? undefined : focusAtEnd}
+                onDrop={props.readOnly ? undefined : handleDrop}
+                onDragOver={props.readOnly ? undefined : handleDragOver}
+                minHeight={props.editorStyle.paddingBottom}
+              />
+            )}
+          </ChunkedEditorWrapper>
         )}
-        {props.editorStyle?.paddingBottom && !props.readOnly && (
-          <ClickablePadding
-            onClick={props.readOnly ? undefined : focusAtEnd}
-            onDrop={props.readOnly ? undefined : handleDrop}
-            onDragOver={props.readOnly ? undefined : handleDragOver}
-            minHeight={props.editorStyle.paddingBottom}
-          />
+        {!isChunkingActive && (
+          <>
+            {paragraphs ? (
+              <EditorContainer
+                rtl={props.dir === "rtl"}
+                grow={props.grow}
+                style={props.style}
+                editorStyle={props.editorStyle}
+                commenting={!!props.onClickCommentMark}
+              >
+                <div className="ProseMirror">
+                  {paragraphs.map((paragraph, index) => (
+                    <p key={index} dir="auto">
+                      {paragraph.content?.map((content) => content.text)}
+                    </p>
+                  ))}
+                </div>
+              </EditorContainer>
+            ) : (
+              <LazyLoadedEditor
+                key={props.extensions?.length || 0}
+                ref={mergeRefs([ref, localRef, handleRefChanged])}
+                uploadFile={handleUploadFile}
+                embeds={embeds}
+                userPreferences={preferences}
+                dictionary={dictionary}
+                {...props}
+                onClickLink={handleClickLink}
+                onChange={handleChange}
+                placeholder={props.placeholder || ""}
+                defaultValue={props.defaultValue || ""}
+              />
+            )}
+            {props.editorStyle?.paddingBottom && !props.readOnly && (
+              <ClickablePadding
+                onClick={props.readOnly ? undefined : focusAtEnd}
+                onDrop={props.readOnly ? undefined : handleDrop}
+                onDragOver={props.readOnly ? undefined : handleDragOver}
+                minHeight={props.editorStyle.paddingBottom}
+              />
+            )}
+          </>
         )}
       </>
     </ErrorBoundary>
